@@ -270,7 +270,11 @@ function importPresetFromCode(code: string): HalftonePreset | null {
     const json = atob(code);
     const preset = JSON.parse(json);
     // Basic validation
-    if (preset && typeof preset.name === "string" && typeof preset.shape === "string") {
+    if (
+      preset &&
+      typeof preset.name === "string" &&
+      typeof preset.shape === "string"
+    ) {
       return preset;
     }
     return null;
@@ -525,7 +529,7 @@ export default function HalftoneTool() {
           {/* Presets Section */}
           <div className="grid gap-4 p-4 border rounded-md bg-muted/50">
             <Label className="text-sm font-semibold">Presets</Label>
-            
+
             {/* Save Preset */}
             <div className="grid gap-2">
               <span className="text-xs">Save Current Settings</span>
