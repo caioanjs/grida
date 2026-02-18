@@ -14,11 +14,13 @@ import { Card } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { ColorPicker32F } from "@/scaffolds/sidecontrol/controls/color-picker";
-import { DownloadIcon } from "lucide-react";
+import { DownloadIcon, SaveIcon, UploadIcon, Trash2Icon } from "lucide-react";
 import kolor from "@grida/color";
+import { toast } from "sonner";
 
 const DEFAULT_GRID = 8;
 const MAX_SIZE = 1024; // px – down‑scale large uploads
+const PRESETS_STORAGE_KEY = "halftone-presets";
 
 type Shape =
   | "circle"
@@ -29,6 +31,22 @@ type Shape =
   | "x"
   | "+"
   | "image";
+
+type HalftonePreset = {
+  name: string;
+  shape: Shape;
+  grid: number;
+  maxRadius: number;
+  gamma: number;
+  jitter: number;
+  opacity: number;
+  color: {
+    r: number;
+    g: number;
+    b: number;
+    a: number;
+  };
+};
 
 function drawShape(
   ctx: CanvasRenderingContext2D,
@@ -225,6 +243,42 @@ function shapeToSVG(shape: Shape, cx: number, cy: number, r: number): string {
   }
 }
 
+/** Load presets from localStorage */
+function loadPresets(): HalftonePreset[] {
+  try {
+    const stored = localStorage.getItem(PRESETS_STORAGE_KEY);
+    return stored ? JSON.parse(stored) : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Save presets to localStorage */
+function savePresets(presets: HalftonePreset[]) {
+  localStorage.setItem(PRESETS_STORAGE_KEY, JSON.stringify(presets));
+}
+
+/** Export preset as base64 encoded JSON */
+function exportPresetToCode(preset: HalftonePreset): string {
+  const json = JSON.stringify(preset);
+  return btoa(json);
+}
+
+/** Import preset from base64 encoded JSON */
+function importPresetFromCode(code: string): HalftonePreset | null {
+  try {
+    const json = atob(code);
+    const preset = JSON.parse(json);
+    // Basic validation
+    if (preset && typeof preset.name === "string" && typeof preset.shape === "string") {
+      return preset;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 export default function HalftoneTool() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [imageSrc, setImageSrc] = useState<string | null>(null);
@@ -241,6 +295,113 @@ export default function HalftoneTool() {
     useState<HTMLImageElement | null>(null);
   const imageDataRef = useRef<ImageData | null>(null);
   const sizeRef = useRef<{ w: number; h: number } | null>(null);
+
+  // Preset management state
+  const [presets, setPresets] = useState<HalftonePreset[]>([]);
+  const [presetName, setPresetName] = useState<string>("");
+  const [importCode, setImportCode] = useState<string>("");
+
+  // Load presets on mount
+  useEffect(() => {
+    setPresets(loadPresets());
+  }, []);
+
+  // Save current settings as a preset
+  const handleSavePreset = () => {
+    if (!presetName.trim()) {
+      toast.error("Please enter a preset name");
+      return;
+    }
+
+    const newPreset: HalftonePreset = {
+      name: presetName.trim(),
+      shape,
+      grid,
+      maxRadius,
+      gamma,
+      jitter,
+      opacity,
+      color: {
+        r: color.r,
+        g: color.g,
+        b: color.b,
+        a: color.a,
+      },
+    };
+
+    const updated = [...presets, newPreset];
+    setPresets(updated);
+    savePresets(updated);
+    setPresetName("");
+    toast.success(`Preset "${newPreset.name}" saved!`);
+  };
+
+  // Load a preset
+  const handleLoadPreset = (presetName: string) => {
+    const preset = presets.find((p) => p.name === presetName);
+    if (!preset) return;
+
+    setShape(preset.shape);
+    setGrid(preset.grid);
+    setMaxRadius(preset.maxRadius);
+    setGamma(preset.gamma);
+    setJitter(preset.jitter);
+    setOpacity(preset.opacity);
+    setColor(
+      kolor.colorformats.newRGBA32F(
+        preset.color.r,
+        preset.color.g,
+        preset.color.b,
+        preset.color.a
+      )
+    );
+    toast.success(`Preset "${preset.name}" loaded!`);
+  };
+
+  // Delete a preset
+  const handleDeletePreset = (presetName: string) => {
+    const updated = presets.filter((p) => p.name !== presetName);
+    setPresets(updated);
+    savePresets(updated);
+    toast.success(`Preset "${presetName}" deleted!`);
+  };
+
+  // Export preset to code
+  const handleExportPreset = (presetName: string) => {
+    const preset = presets.find((p) => p.name === presetName);
+    if (!preset) return;
+
+    const code = exportPresetToCode(preset);
+    navigator.clipboard.writeText(code);
+    toast.success("Preset code copied to clipboard!");
+  };
+
+  // Import preset from code
+  const handleImportPreset = () => {
+    if (!importCode.trim()) {
+      toast.error("Please enter a preset code");
+      return;
+    }
+
+    const preset = importPresetFromCode(importCode.trim());
+    if (!preset) {
+      toast.error("Invalid preset code");
+      return;
+    }
+
+    // Check if preset with same name exists
+    const exists = presets.some((p) => p.name === preset.name);
+    if (exists) {
+      toast.error(`Preset "${preset.name}" already exists`);
+      return;
+    }
+
+    const updated = [...presets, preset];
+    setPresets(updated);
+    savePresets(updated);
+    setImportCode("");
+    toast.success(`Preset "${preset.name}" imported!`);
+  };
 
   useEffect(() => {
     if (!imageSrc) return;
@@ -361,6 +522,93 @@ export default function HalftoneTool() {
     <main className="flex-1 w-full h-full flex py-4 container mx-auto gap-4">
       <aside className="flex-1">
         <Card className="flex flex-col gap-6 p-6">
+          {/* Presets Section */}
+          <div className="grid gap-4 p-4 border rounded-md bg-muted/50">
+            <Label className="text-sm font-semibold">Presets</Label>
+            
+            {/* Save Preset */}
+            <div className="grid gap-2">
+              <span className="text-xs">Save Current Settings</span>
+              <div className="flex gap-2">
+                <Input
+                  placeholder="Preset name..."
+                  value={presetName}
+                  onChange={(e) => setPresetName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleSavePreset();
+                  }}
+                />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleSavePreset}
+                  disabled={!presetName.trim()}
+                >
+                  <SaveIcon className="size-4" />
+                </Button>
+              </div>
+            </div>
+
+            {/* Load Preset */}
+            {presets.length > 0 && (
+              <div className="grid gap-2">
+                <span className="text-xs">Load Preset</span>
+                <div className="flex flex-col gap-2">
+                  {presets.map((preset) => (
+                    <div key={preset.name} className="flex gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="flex-1 justify-start"
+                        onClick={() => handleLoadPreset(preset.name)}
+                      >
+                        {preset.name}
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleExportPreset(preset.name)}
+                        title="Copy preset code"
+                      >
+                        <UploadIcon className="size-4" />
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleDeletePreset(preset.name)}
+                      >
+                        <Trash2Icon className="size-4" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Import Preset */}
+            <div className="grid gap-2">
+              <span className="text-xs">Import Preset</span>
+              <div className="flex gap-2">
+                <Input
+                  placeholder="Paste preset code..."
+                  value={importCode}
+                  onChange={(e) => setImportCode(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleImportPreset();
+                  }}
+                />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleImportPreset}
+                  disabled={!importCode.trim()}
+                >
+                  <UploadIcon className="size-4" />
+                </Button>
+              </div>
+            </div>
+          </div>
+
           <Label>Shape</Label>
           <div className="grid gap-2">
             <span className="text-xs">Image</span>
